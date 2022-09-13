@@ -21,42 +21,60 @@
 
 #include "rclcpp/rclcpp.hpp"
 
-
 template<class MsgT, size_t width = MsgT::WIDTH, size_t height = MsgT::HEIGHT>
-class BurgerSubscriber
-{
-public:
+class BurgerSubscriber {
+ public:
   BurgerSubscriber(std::shared_ptr<rclcpp::Node> node, std::string topic, bool show_gui = true)
-  : sub_(node->create_subscription<MsgT>(
-        topic,
-        1,
-        std::bind(&BurgerSubscriber<MsgT>::show_image, this, std::placeholders::_1))),
-    node_(node),
-    show_gui_(show_gui),
-    k_(0),
-    average_round_time_(0)
-  {}
+      : sub_(node->create_subscription<MsgT>(
+      topic,
+      9,
+      std::bind(&BurgerSubscriber<MsgT>::show_image, this, std::placeholders::_1))),
+        node_(node),
+        show_gui_(show_gui),
+        k_(0),
+        average_round_time_(0),
+        init_time_{false},
+        count_{0} {}
 
-  virtual ~BurgerSubscriber()
-  {
+  virtual ~BurgerSubscriber() {
     auto logger = rclcpp::get_logger("image_transport_subscriber");
     RCLCPP_INFO(logger, "Received %" PRId64 " messages", k_);
     RCLCPP_INFO(
-      logger, "Average round time %f milliseconds", static_cast<float>(average_round_time_) / 1e6);
+        logger, "Average round time %f milliseconds", static_cast<float>(average_round_time_) / 1e6);
   }
 
-  void show_image(std::shared_ptr<MsgT> image)
-  {
+  void show_image(std::shared_ptr<MsgT> image) {
+    rclcpp::Time time_message(image->timestamp);
+
+    if (!init_time_) {
+      last_time_ = time_message;
+      init_time_ = true;
+    } else {
+      count_++;
+      rclcpp::Duration duration = time_message - last_time_;
+      if (duration.seconds() > 3.0) {
+        RCLCPP_INFO(rclcpp::get_logger("image_transport_subscriber"),
+                    "Received %d images in %f secs; %f hz.",
+                    count_,
+                    duration.seconds(),
+                    static_cast<double>(count_) / duration.seconds());
+        count_ = 0;
+        last_time_ = time_message;
+      }
+    }
+
     auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-      std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
     auto logger = rclcpp::get_logger("image_transport_subscriber");
-    RCLCPP_INFO(
-      logger,
-      "Received message %zu on address %p", image->step, image.get());
     auto msg_timestamp = image.get()->timestamp;
 
     auto diff = now - msg_timestamp;
+
+    rclcpp::Duration duration_msg(now - msg_timestamp);
+    RCLCPP_INFO(
+        logger,
+        "Received message %zu on address %p delay: %f ms.", image->step, image.get(), duration_msg.seconds());
 
     ++k_;
     average_round_time_ = ((k_ - 1) * average_round_time_ + diff) / k_;
@@ -67,17 +85,20 @@ public:
     }
   }
 
-  void run()
-  {
+  void run() {
     rclcpp::spin(node_);
   }
 
-private:
+ private:
   std::shared_ptr<rclcpp::Subscription<MsgT>> sub_;
   std::shared_ptr<rclcpp::Node> node_;
   bool show_gui_;
   int64_t k_;
   int64_t average_round_time_;
+
+  bool init_time_;
+  rclcpp::Time last_time_;
+  int count_;
 };
 
 #endif  // BURGER_SUBSCRIBER_HPP_

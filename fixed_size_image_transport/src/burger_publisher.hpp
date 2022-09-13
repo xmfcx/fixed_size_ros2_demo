@@ -29,13 +29,16 @@ class BurgerPublisher
 {
 public:
   BurgerPublisher(std::shared_ptr<rclcpp::Node> node, std::string topic)
-  : pub_(node->create_publisher<MsgT>(topic, 1)),
+  : pub_(node->create_publisher<MsgT>(topic, 9)),
     logger_(node->get_logger())
   {}
 
   void run(double frequency, bool loaning)
   {
     static size_t count = 0;
+    size_t count_hz = 0;
+    bool init_time_ = false;
+    rclcpp::Time last_time_;
 
     rclcpp::WallRate loop_rate(frequency);
 
@@ -77,6 +80,24 @@ public:
           std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
         pub_->publish(std::move(image_msg));
+      }
+
+      if (!init_time_) {
+        last_time_ = rclcpp::Clock().now();
+        init_time_ = true;
+      } else {
+        count_hz++;
+        rclcpp::Time time_now = rclcpp::Clock().now();
+        rclcpp::Duration duration = time_now - last_time_;
+        if (duration.seconds() > 3.0) {
+          RCLCPP_INFO(logger_,
+                      "Received %d images in %f secs; %f hz.",
+                      count_hz,
+                      duration.seconds(),
+                      static_cast<double>(count_hz) / duration.seconds());
+          count_hz = 0;
+          last_time_ = time_now;
+        }
       }
 
       RCLCPP_INFO(logger_, "Publishing message %zu", count);
